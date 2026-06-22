@@ -1,0 +1,10 @@
+# Output CSVs (contain hostnames — don't commit)
+DNSAuditResults_*.csv
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# PowerShell logs
+*.log
+*.transcript

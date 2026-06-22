@@ -1,0 +1,4 @@
+MachineName,DomainName,FQDN,IP,Resolved_HostName,Status1,Status2,MatchStatus
+WORKSTATION01,corp.local,,,,,,
+WORKSTATION02,corp.local,,,,,,
+SERVER01,corp.local,,,,,,
