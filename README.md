@@ -1,32 +1,28 @@
 # DNS Audit — Forward & Reverse Record Validator
 
-A PowerShell script that runs forward (A) and reverse (PTR) DNS queries against every host in a domain machine list, flags records where the two results don't match, and exports a timestamped CSV for analysis.
+## Overview
+A PowerShell script that validates forward (A) and reverse (PTR) DNS records for every host in a domain machine list. It resolves each hostname to an IP, then resolves that IP back to a hostname, and flags any mismatches — exporting a timestamped CSV for review and remediation.
 
-![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue?logo=powershell) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?logo=windows) ![License](https://img.shields.io/badge/License-MIT-green)
+## Problem It Solves
+Stale or mismatched DNS records cause silent, hard-to-trace connectivity failures across managed Windows domains. Without a systematic audit, these records accumulate unnoticed. This script was written after noticing anomalous DNS names during end-user connectivity troubleshooting — running it across all domain hosts revealed that **approximately 40% of machines had incorrect or stale DNS records**, which turned out to be the root cause of several long-standing, recurring network issues.
 
-## Background
+## Key Features
+- Forward lookup (A record) + reverse lookup (PTR) for every host in the input CSV
+- Match/Mismatch status per host with clear failure categorization
+- Timestamped output CSV — reruns never overwrite prior results
+- Handles lookup failures gracefully (no IP, no PTR, DNS timeout)
+- No elevated privileges required — runs as a standard domain user
+- Parameterized input/output paths — fully portable across environments
 
-This script was written after noticing anomalous DNS names while troubleshooting end-user connectivity issues on a managed Windows domain. Running it across all domain hosts revealed that approximately **40% of machines had incorrect or stale DNS records** — a root cause behind several major and recurring network problems in the organization. The mismatch report gave the team a prioritized list to resolve, closing out an issue that had been open for an extended period.
+## Technologies Used
+- PowerShell 5.1+
+- `Resolve-DnsName` (built-in Windows DNS client)
+- CSV input/output via `Import-Csv` / `Export-Csv`
 
-## What It Does
+## Example Use Case
+An IT team is receiving sporadic help desk tickets about users unable to reach internal resources by name. Running this script against the full machine list surfaces 60+ hosts with stale PTR records pointing to old hostnames from a prior imaging cycle — giving the team a prioritized remediation list that closes out months of open tickets in a single afternoon.
 
-For each host in the input CSV:
-
-1. Constructs the **FQDN** from `MachineName` + `.` + `DomainName`
-2. **Forward lookup** — resolves the FQDN to an IP address (A record only)
-3. **Reverse lookup** — resolves that IP back to a hostname (PTR record)
-4. **Compares** the PTR result against the FQDN and marks `Match` or `Mismatch`
-5. Exports all results to a **timestamped CSV** (reruns never overwrite prior results)
-
-## Requirements
-
-| Requirement | Detail |
-|-------------|--------|
-| PowerShell | 5.1 or later |
-| Network | DNS resolution access to the domain's name servers |
-| Permissions | Standard domain user — no elevated rights needed |
-
-## Usage
+## How to Run
 
 ```powershell
 # Default — reads .\machines.csv, writes timestamped CSV to current directory
@@ -35,25 +31,21 @@ For each host in the input CSV:
 # Specify input file
 .\Invoke-DNSAudit.ps1 -InputCsv "C:\Lists\all_machines.csv"
 
-# Specify both input and output
-.\Invoke-DNSAudit.ps1 -InputCsv ".\all_machines.csv" -OutputCsv "C:\Reports\dns_audit.csv"
+# Specify both input and output paths
+.\Invoke-DNSAudit.ps1 -InputCsv ".\machines.csv" -OutputCsv "C:\Reports\dns_audit.csv"
 ```
 
-### Input CSV format
-
-The input file must contain at minimum `MachineName` and `DomainName` columns. The remaining columns are written by the script and can be blank placeholders:
+**Input CSV format** (`machines.csv` template included in repo):
 
 ```csv
-MachineName,DomainName,FQDN,IP,Resolved_HostName,Status1,Status2,MatchStatus
-WORKSTATION01,corp.local,,,,,,
-WORKSTATION02,corp.local,,,,,,
-SERVER01,corp.local,,,,,,
+MachineName,DomainName
+WORKSTATION01,corp.local
+SERVER01,corp.local
 ```
 
-A ready-to-use `machines.csv` template is included in this repo.
+## Example Output
 
-### Example Output
-
+**Console:**
 ```
 DNS Audit complete.
   Total hosts  : 150
@@ -62,27 +54,22 @@ DNS Audit complete.
   Results saved: .\DNSAuditResults_20260621_143055.csv
 ```
 
-Sample output CSV row:
+**Output CSV sample:**
 
-| MachineName | DomainName | FQDN | IP | Resolved_HostName | Status1 | Status2 | MatchStatus |
-|---|---|---|---|---|---|---|---|
-| WORKSTATION01 | corp.local | WORKSTATION01.corp.local | 10.10.1.42 | WORKSTATION01.corp.local | Success | Success | Match |
-| SERVER03 | corp.local | SERVER03.corp.local | 10.10.1.87 | OLDSERVER03.corp.local | Success | Success | Mismatch |
-| LAPTOP22 | corp.local | LAPTOP22.corp.local | | | Fail | Skipped — no IP | Mismatch |
+| MachineName | FQDN | IP | Resolved_HostName | MatchStatus |
+|---|---|---|---|---|
+| WORKSTATION01 | WORKSTATION01.corp.local | 10.10.1.42 | WORKSTATION01.corp.local | Match |
+| SERVER03 | SERVER03.corp.local | 10.10.1.87 | OLDSERVER03.corp.local | Mismatch |
+| LAPTOP22 | LAPTOP22.corp.local | | | Mismatch |
 
-## Bugs Fixed from Original Version
+## Security Notes
+- Requires only **standard domain user** permissions — no admin rights needed
+- Does not modify any DNS records — read-only audit only
+- Output CSV may contain internal hostnames and IPs; treat as sensitive and store accordingly
+- Authorized use only — run only against systems and domains you are authorized to audit
 
-| # | Bug | Impact | Fix |
-|---|-----|--------|-----|
-| 1 | FQDN built without a dot separator: `PC001corp.local` | All forward lookups fail | Changed to `"$MachineName.$DomainName"` |
-| 2 | Forward lookup queried the short `MachineName` instead of the FQDN | Could resolve against wrong DNS search suffix | Changed to query `$row.FQDN` |
-| 3 | Reverse lookup compared PTR result (full FQDN) against short `MachineName` | **Every record reported Mismatch**, even correct ones | Changed comparison to `$row.FQDN`, case-insensitive |
-| 4 | `Resolve-DnsName` result not filtered by record type — `.IPAddress[0]` could grab a null from a CNAME or SOA record | Silent wrong IP or null-dereference error | Added `Where-Object { $_.Type -eq 'A' }` filter |
-| 5 | Reverse lookup attempted even when `$row.IP` was empty | Confusing unrelated error masked the real forward-lookup failure | Added guard: skip reverse block entirely if IP is blank |
-| 6 | Input/output paths hardcoded with a real username | Not portable; exposed PII | Converted to `-InputCsv` / `-OutputCsv` parameters |
-| 7 | No existence check on input file | Unhelpful error from `Import-Csv` | Added `Test-Path` guard |
-| 8 | Output file overwritten on every rerun | Prior results lost | Timestamp appended to output filename automatically |
-
-## License
-
-MIT — see [LICENSE](LICENSE) for details.
+## Lessons Learned
+- `Resolve-DnsName` returns multiple record types (A, CNAME, SOA); filtering to `Type -eq 'A'` is required to avoid grabbing a null IP from an unexpected record type
+- Building FQDNs requires an explicit dot separator (`"$MachineName.$DomainName"`) — omitting it silently concatenates the strings and causes 100% lookup failure
+- Comparing PTR results against the short `MachineName` instead of the full FQDN caused every record to report Mismatch, even correct ones
+- Timestamped output filenames are essential for iterative audits — overwriting a prior run destroys the before/after comparison
